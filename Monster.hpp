@@ -13,7 +13,7 @@ class Monster {
     int agility;
     int strength;
 
-    int viewRdaius;
+    int viewRadius;
 
     Item helm;
     Item armor;
