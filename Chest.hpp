@@ -9,4 +9,6 @@ class Chest {
     Item item;
 public:
     Point GetPosition() const;
+    bool IsOpen() const;
+    Item Open();
 };

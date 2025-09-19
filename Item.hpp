@@ -3,11 +3,15 @@
 #include <string>
 
 class Item {
-    std::string name;
-    int defense;
-    int attack;
+    std::string name_;
+    int defense_;
+    int attack_;
 
 public:
-    int getDefense() const;
-    int getAttack() const;
+    Item() = default;
+    Item(const std::string& name, int def, int att);
+    int GetDefense() const;
+    int GetAttack() const;
 };
+
+const Item NO_ITEM {"no item", 0, 0};
