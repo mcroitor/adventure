@@ -4,13 +4,46 @@ A simple adventure game written in C++. A Player can move in the Square World, p
 
 ## Game representation
 
-- `Engine`: un obiect ce implementeaza logica jocului;
-- `Player`: un obiect ce reprezinta jucatorul, cu atribute precum pozitia, viata, si echipamentul;
-- `Item`: un obiect ce reprezinta un item in ce poate echipa jucatorul;
-- `Direction`: un enum ce reprezinta directiile in care se poate misca jucatorul;
-- `Monster`: clasa ce reprezinta un monstru cu atribute precum viata si puterea de atac;
-- `Point`: clasa ce reprezinta o pozitie in harta;
-- `Chest`: clasa ce reprezinta o comoara ce poate contine iteme;
-- `Obstacle`: clasa ce reprezinta un obstacol in harta;
-- `Renderer`: clasa ce se ocupa de afisarea jocului pe ecran, fi consola sau GUI;
-- `Map`: clasa prezinta harta lumii.
+- `Engine`: an object that manages the game state, including the player, map, and game loop;
+- `Player`: an object that represents the player, with attributes such as position, health, and equipment;
+- `Item`: an object that represents an item that can be equipped by the player;
+- `Direction`: an enum that represents the directions in which the player can move;
+- `Monster`: a class that represents a monster with attributes such as health and attack power;
+- `Point`: a class that represents a position on the map;
+- `Chest`: a class that represents a treasure chest that can contain items;
+- `Obstacle`: a class that represents an obstacle on the map;
+- `Renderer`: a class that handles the display of the game on the screen, whether console or GUI;
+- `Map`: a class that represents the game world map.
+
+## Compilation and Running
+
+The game can be compiled and run using the following methods:
+
+1. Using `Makefile`:
+
+   ```bash
+   make
+   ./bin/adventure
+   ```
+
+2. Using `CMake`:
+
+   ```bash
+   mkdir build
+   cd build
+   cmake ..
+   make
+   ```
+
+    Then run the game with:
+
+    ```bash
+   ./bin/adventure
+   ```
+
+3. Using `build.cmd`:
+
+   ```cmd
+    build.cmd
+    .\bin\adventure.exe
+   ```

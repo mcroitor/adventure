@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 enum class Direction {
     NORTH,
     SOUTH,
@@ -10,3 +12,5 @@ enum class Direction {
     SOUTH_EAST,
     SOUTH_WEST,
 };
+
+std::string to_string(Direction direction);

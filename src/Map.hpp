@@ -15,4 +15,12 @@ class Map {
     Obstacle obstacles[10];
 public:
     Map() = default;
+
+    int GetWidth() const;
+    int GetHeight() const;
+    void Generate();
+    Player& GetPlayer();
+    Monster* GetMonsters();
+    Chest* GetChests();
+    Obstacle* GetObstacles();
 };
