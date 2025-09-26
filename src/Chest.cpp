@@ -11,5 +11,6 @@ bool Chest::IsOpen() const{
 Item Chest::Open(){
     Item tmp = this->item;
     item = NO_ITEM;
+    this->isOpen = true;
     return tmp;
 }
