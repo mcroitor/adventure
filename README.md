@@ -30,9 +30,9 @@ The game can be compiled and run using the following methods:
 
    ```bash
    mkdir build
-    cd build
-    cmake ..
-    make
+   cd build
+   cmake ..
+   make
    ```
 
     Then run the game with:
