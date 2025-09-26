@@ -21,9 +21,9 @@ clean:
 
 help:
 	@echo Usage:
-	@echo make - asamblează aplicația
-	@echo make clean - elimină artefactele asamblării
-	@echo make help - afișează ajutorul
+	@echo make - builds the application
+	@echo make clean - removes build artifacts
+	@echo make help - displays help
 
 $(APP): $(OBJ)
 	$(CC) $(OBJ) -o $(BINDIR)/$(APP) $(LDFLAGS)
