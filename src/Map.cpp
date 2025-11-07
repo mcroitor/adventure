@@ -3,6 +3,8 @@
 #include <cstdlib>
 #include <ctime>
 
+#include <fstream>
+
 int Map::GetHeight() const {
     return height;
 }
@@ -46,4 +48,22 @@ void Map::Generate() {
     for (auto& obstacle : obstacles) {
         obstacle = Obstacle();
     }
+}
+
+void Map::Load() {}
+
+void Map::Save() const {
+    // save to file current map state
+    std::ofstream file("map_save.txt");
+
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not open file for writing." << std::endl;
+        return;
+    }
+
+    // Save map dimensions
+    // Save player
+    // Save monsters
+    // Save chests
+    // Save obstacles
 }

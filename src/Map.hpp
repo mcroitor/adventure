@@ -23,4 +23,7 @@ public:
     Monster* GetMonsters();
     Chest* GetChests();
     Obstacle* GetObstacles();
+
+    void Load();
+    void Save() const;
 };
