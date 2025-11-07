@@ -44,3 +44,6 @@
 bin/
 obj/
 build/
+
+# vscode settings
+.vscode/
