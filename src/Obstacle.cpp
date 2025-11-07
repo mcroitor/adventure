@@ -21,7 +21,7 @@ Obstacle& Obstacle::operator=(const Obstacle& other){
 }
 
 bool Obstacle::operator==(const Obstacle& other) const {
-    return type == other.type && position == other.GetPosition();
+    return type == other.GetType() && position == other.GetPosition();
 }
 
 std::ostream& operator<<(std::ostream& os, const Obstacle& obstacle) {

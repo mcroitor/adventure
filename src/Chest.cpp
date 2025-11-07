@@ -29,7 +29,7 @@ Item Chest::Open(){
 
 std::ostream& operator<<(std::ostream& os, const Chest& chest) {
     char sep = ':';
-    os << chest.GetPosition() << sep << chest.IsOpen() << sep << chest.item;
+    os << chest.GetPosition() << sep << chest.IsOpen() << sep << chest.GetItem();
     return os;
 }
 
