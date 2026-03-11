@@ -1,13 +1,17 @@
 #include "Engine.hpp"
+#include "EventBus.hpp"
+#include "GameConfig.hpp"
 #include "Listener.hpp"
+#include "Logger.hpp"
+#include "ResourceManager.hpp"
 #include "Renderer.hpp"
+#include <curses.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cctype>
 #include <cstdlib>
 #include <deque>
-#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -16,12 +20,37 @@
 namespace {
 
 void PushMessage(std::deque<std::string>& log, const std::string& message) {
-    constexpr size_t kMaxMessages = 24;
+    const size_t kMaxMessages = static_cast<size_t>(
+        std::max(1, GameConfig::Instance().GetMessageLogCapacity())
+    );
     log.push_back(message);
     if (log.size() > kMaxMessages) {
         log.pop_front();
     }
 }
+
+void PublishEvent(EventBus& eventBus, const GameEvent& event) {
+    eventBus.Publish(event);
+}
+
+void PublishEvent(EventBus& eventBus, GameEventType type, const std::string& message) {
+    PublishEvent(eventBus, GameEventFactory::Basic(type, message));
+}
+
+class ScopedLoggerStdErrMute {
+public:
+    ScopedLoggerStdErrMute()
+        : previous(Logger::Instance().IsMirrorToStdErrEnabled()) {
+        Logger::Instance().SetMirrorToStdErr(false);
+    }
+
+    ~ScopedLoggerStdErrMute() {
+        Logger::Instance().SetMirrorToStdErr(previous);
+    }
+
+private:
+    bool previous;
+};
 
 enum class StartMenuChoice {
     CONTINUE_SAVE,
@@ -69,15 +98,16 @@ void ShowHelpScreen(Renderer& renderer, Listener& listener) {
         DrawCenteredText(renderer, 6, "Interact: E");
         DrawCenteredText(renderer, 7, "Inventory window: I");
         DrawCenteredText(renderer, 8, "Equipment: K");
-        DrawCenteredText(renderer, 9, "Action menu: M");
+        DrawCenteredText(renderer, 9, "Action menu: M or Esc");
         DrawCenteredText(renderer, 10, "Use inventory slot: 1..9");
         DrawCenteredText(renderer, 11, "Allocate stats: P then 1/2/3");
-        DrawCenteredText(renderer, 12, "Restart run: R (with confirmation)");
-        DrawCenteredText(renderer, 13, "Quit and save: Q");
-        DrawCenteredText(renderer, 14, "Open this help: F1");
+        DrawCenteredText(renderer, 12, "Draw mode: action menu (M) then 9");
+        DrawCenteredText(renderer, 13, "Restart run: R (with confirmation)");
+        DrawCenteredText(renderer, 14, "Quit and save: Q");
+        DrawCenteredText(renderer, 15, "Open this help: F1");
 
         renderer.SetForegroundColor(Color::LightCyan);
-        DrawCenteredText(renderer, 15, "Close help: Esc or F1");
+        DrawCenteredText(renderer, 16, "Close help: Esc or F1");
         renderer.Draw();
 
         const int key = listener.GetKey(-1);
@@ -103,10 +133,11 @@ Action ShowActionMenuScreen(Renderer& renderer, Listener& listener) {
         DrawCenteredText(renderer, 9, "[6] Open help");
         DrawCenteredText(renderer, 10, "[7] Restart run");
         DrawCenteredText(renderer, 11, "[8] Quit and save");
+        DrawCenteredText(renderer, 12, "[9] ASCII draw mode");
 
         renderer.SetForegroundColor(Color::LightCyan);
-        DrawCenteredText(renderer, 13, "Press 1..8 to choose action");
-        DrawCenteredText(renderer, 14, "Close: Esc or M");
+        DrawCenteredText(renderer, 14, "Press 1..9 to choose action");
+        DrawCenteredText(renderer, 15, "Close: Esc or M");
         renderer.Draw();
 
         int key = listener.GetKey(-1);
@@ -123,8 +154,189 @@ Action ShowActionMenuScreen(Renderer& renderer, Listener& listener) {
         case '6': return Action::TOGGLE_HELP;
         case '7': return Action::RESTART_GAME;
         case '8': return Action::QUIT_GAME;
+        case '9': return Action::DRAW_ASCII;
         default:
             break;
+        }
+    }
+}
+
+void ShowAsciiDrawScreen(Renderer& renderer, Listener& listener, EventBus& eventBus) {
+    const int screenWidth = renderer.GetScreenWidth();
+    const int screenHeight = renderer.GetScreenHeight();
+
+    const int canvasWidth = std::max(10, screenWidth - 4);
+    const int canvasHeight = std::max(6, screenHeight - 8);
+
+    std::vector<std::string> canvas(
+        static_cast<size_t>(canvasHeight),
+        std::string(static_cast<size_t>(canvasWidth), ' ')
+    );
+
+    int cursorX = canvasWidth / 2;
+    int cursorY = canvasHeight / 2;
+    char brush = '^';
+
+    while (true) {
+        renderer.ClearScreen();
+        renderer.SetBackgroundColor(Color::Black);
+
+        renderer.SetForegroundColor(Color::Yellow);
+        renderer.PutText(2, 0, "ASCII DRAW MODE");
+
+        renderer.SetForegroundColor(Color::White);
+        renderer.PutText(2, 1, "Move: arrows or w/a/s/d | Paint: Enter or X | Erase: Space | Clear: C | Save: Shift+S | Load: L");
+        renderer.PutText(2, 2, "Brush presets: 1:^ 2:~ 3:T 4:# 5:. 6:* 7:\" 8:` 9:: | Any printable key sets brush+paint | Exit: Esc");
+
+        const int canvasX = 2;
+        const int canvasY = 4;
+
+        const std::string border = "+" + std::string(static_cast<size_t>(canvasWidth), '-') + "+";
+        renderer.SetForegroundColor(Color::LightGray);
+        renderer.PutText(canvasX - 1, canvasY - 1, border);
+        for (int y = 0; y < canvasHeight; ++y) {
+            renderer.PutChar(canvasX - 1, canvasY + y, '|');
+            renderer.PutText(canvasX, canvasY + y, canvas[static_cast<size_t>(y)]);
+            renderer.PutChar(canvasX + canvasWidth, canvasY + y, '|');
+        }
+        renderer.PutText(canvasX - 1, canvasY + canvasHeight, border);
+
+        const char currentCell = canvas[static_cast<size_t>(cursorY)][static_cast<size_t>(cursorX)];
+        renderer.SetForegroundColor(Color::Yellow);
+        renderer.PutChar(
+            canvasX + cursorX,
+            canvasY + cursorY,
+            currentCell == ' ' ? '_' : currentCell
+        );
+
+        renderer.SetForegroundColor(Color::LightCyan);
+        {
+            std::ostringstream os;
+            os << "Cursor: (" << cursorX << ", " << cursorY << ")  Brush: '" << brush
+               << "'  Save file: data/ascii_art_canvas.txt";
+            renderer.PutText(2, canvasY + canvasHeight + 1, os.str());
+        }
+
+        renderer.Draw();
+
+        const int key = listener.GetKey(-1);
+        if (key == 27) {
+            return;
+        }
+
+        if (key == KEY_UP || key == 'w' || key == 'W') {
+            cursorY = std::max(0, cursorY - 1);
+            continue;
+        }
+        if (key == KEY_DOWN || key == 's') {
+            cursorY = std::min(canvasHeight - 1, cursorY + 1);
+            continue;
+        }
+        if (key == KEY_LEFT || key == 'a' || key == 'A') {
+            cursorX = std::max(0, cursorX - 1);
+            continue;
+        }
+        if (key == KEY_RIGHT || key == 'd' || key == 'D') {
+            cursorX = std::min(canvasWidth - 1, cursorX + 1);
+            continue;
+        }
+
+        if (key == '1') {
+            brush = '^';
+            continue;
+        }
+        if (key == '2') {
+            brush = '~';
+            continue;
+        }
+        if (key == '3') {
+            brush = 'T';
+            continue;
+        }
+        if (key == '4') {
+            brush = '#';
+            continue;
+        }
+        if (key == '5') {
+            brush = '.';
+            continue;
+        }
+        if (key == '6') {
+            brush = '*';
+            continue;
+        }
+        if (key == '7') {
+            brush = '"';
+            continue;
+        }
+        if (key == '8') {
+            brush = '`';
+            continue;
+        }
+        if (key == '9') {
+            brush = ':';
+            continue;
+        }
+
+        if (key == 'c' || key == 'C') {
+            for (auto& row : canvas) {
+                std::fill(row.begin(), row.end(), ' ');
+            }
+            PublishEvent(eventBus, GameEventType::System, "ASCII canvas cleared.");
+            continue;
+        }
+
+        if (key == 'S') {
+            std::ofstream out("data/ascii_art_canvas.txt");
+            if (!out.is_open()) {
+                PublishEvent(eventBus, GameEventType::Warning, "Failed to save ASCII canvas.");
+            } else {
+                for (const auto& row : canvas) {
+                    out << row << '\n';
+                }
+                PublishEvent(eventBus, GameEventType::Save, "ASCII canvas saved to data/ascii_art_canvas.txt");
+            }
+            continue;
+        }
+
+        if (key == 'l' || key == 'L') {
+            std::ifstream in("data/ascii_art_canvas.txt");
+            if (!in.is_open()) {
+                PublishEvent(eventBus, GameEventType::Warning, "Failed to load ASCII canvas: file not found.");
+            } else {
+                for (auto& row : canvas) {
+                    std::fill(row.begin(), row.end(), ' ');
+                }
+
+                std::string line;
+                int y = 0;
+                while (y < canvasHeight && std::getline(in, line)) {
+                    const size_t copyLen = std::min(static_cast<size_t>(canvasWidth), line.size());
+                    for (size_t x = 0; x < copyLen; ++x) {
+                        char c = line[x];
+                        canvas[static_cast<size_t>(y)][x] = (c >= 32 && c <= 126) ? c : ' ';
+                    }
+                    ++y;
+                }
+
+                PublishEvent(eventBus, GameEventType::System, "ASCII canvas loaded from data/ascii_art_canvas.txt");
+            }
+            continue;
+        }
+
+        if (key == ' ' || key == KEY_BACKSPACE || key == 127) {
+            canvas[static_cast<size_t>(cursorY)][static_cast<size_t>(cursorX)] = ' ';
+            continue;
+        }
+
+        if (key == 'x' || key == 'X' || key == 10 || key == 13) {
+            canvas[static_cast<size_t>(cursorY)][static_cast<size_t>(cursorX)] = brush;
+            continue;
+        }
+
+        if (key >= 33 && key <= 126) {
+            brush = static_cast<char>(key);
+            canvas[static_cast<size_t>(cursorY)][static_cast<size_t>(cursorX)] = brush;
         }
     }
 }
@@ -133,7 +345,7 @@ bool ShowInventoryScreen(
     Renderer& renderer,
     Listener& listener,
     Player& player,
-    std::deque<std::string>& messages
+    EventBus& eventBus
 ) {
     while (true) {
         renderer.ClearScreen();
@@ -178,13 +390,13 @@ bool ShowInventoryScreen(
         if (key >= '1' && key <= '9') {
             int index = key - '1';
             if (index >= player.GetInventorySize()) {
-                PushMessage(messages, "No item in this inventory slot.");
+                PublishEvent(eventBus, GameEventType::Warning, "No item in this inventory slot.");
                 return true;
             }
 
             std::string itemName = player.GetInventory()[index].GetName();
             player.UseItem(index);
-            PushMessage(messages, "Used: " + itemName);
+            PublishEvent(eventBus, GameEventType::System, "Used: " + itemName);
             return true;
         }
     }
@@ -213,7 +425,7 @@ bool ShowEquipmentScreen(
     Renderer& renderer,
     Listener& listener,
     Player& player,
-    std::deque<std::string>& messages
+    EventBus& eventBus
 ) {
     const std::vector<std::pair<std::string, const Item*>> slots = {
         {"Helm", &player.GetHelm()},
@@ -278,13 +490,13 @@ bool ShowEquipmentScreen(
         if (key >= '1' && key <= '9') {
             int index = key - '1';
             if (index >= player.GetInventorySize()) {
-                PushMessage(messages, "No item in this inventory slot.");
+                PublishEvent(eventBus, GameEventType::Warning, "No item in this inventory slot.");
                 return true;
             }
 
             std::string itemName = player.GetInventory()[index].GetName();
             player.UseItem(index);
-            PushMessage(messages, "Used: " + itemName);
+            PublishEvent(eventBus, GameEventType::System, "Used: " + itemName);
             return true;
         }
     }
@@ -570,9 +782,11 @@ int RegeneratePlayerHealth(
 void TryAutoSave(
     Map& map,
     std::chrono::steady_clock::time_point& lastAutoSaveTick,
-    std::deque<std::string>& messages
+    EventBus& eventBus
 ) {
-    constexpr auto kAutoSaveInterval = std::chrono::seconds(45);
+    const auto kAutoSaveInterval = std::chrono::seconds(
+        std::max(1, GameConfig::Instance().GetAutoSaveIntervalSeconds())
+    );
 
     const auto now = std::chrono::steady_clock::now();
     if (now - lastAutoSaveTick < kAutoSaveInterval) {
@@ -581,9 +795,9 @@ void TryAutoSave(
 
     lastAutoSaveTick = now;
     if (map.Save()) {
-        PushMessage(messages, "Game auto-saved.");
+        PublishEvent(eventBus, GameEventType::Save, "Game auto-saved.");
     } else {
-        PushMessage(messages, "Auto-save failed.");
+        PublishEvent(eventBus, GameEventType::Warning, "Auto-save failed.");
     }
 }
 
@@ -721,20 +935,18 @@ std::vector<QuestTemplate> ParseQuestTemplates(std::istream& input) {
 }
 
 std::vector<QuestTemplate> LoadQuestTemplates() {
-    constexpr const char* kQuestTemplatePaths[] = {
-        "data/quests.txt",
-        "../data/quests.txt"
-    };
-
-    for (const char* path : kQuestTemplatePaths) {
-        std::ifstream file(path);
-        if (!file.is_open()) {
-            continue;
-        }
-
+    std::ifstream file;
+    std::string resolvedPath;
+    if (ResourceManager::Instance().OpenFirstFound(
+            GameConfig::Instance().GetQuestTemplatePaths(),
+            file,
+            resolvedPath
+        )) {
+        Logger::Instance().Info("Loaded quest templates file: " + resolvedPath);
         return ParseQuestTemplates(file);
     }
 
+    Logger::Instance().Warn("Quest templates file not found in configured paths.");
     return {};
 }
 
@@ -864,25 +1076,39 @@ Quest CreateQuestForNpc(const Map& map, const NPC& npc, const std::vector<QuestT
     );
 }
 
-void PushQuestCompletionHint(std::deque<std::string>& messages, int newlyCompleted) {
+void PushQuestCompletionHint(EventBus& eventBus, int newlyCompleted) {
     if (newlyCompleted <= 0) {
         return;
     }
 
     if (newlyCompleted == 1) {
-        PushMessage(messages, "Quest updated: objective complete. Return to quest giver.");
+        PublishEvent(
+            eventBus,
+            GameEventFactory::Quest(
+                "Quest updated: objective complete. Return to quest giver.",
+                std::nullopt,
+                std::nullopt,
+                newlyCompleted
+            )
+        );
         return;
     }
 
     std::ostringstream os;
     os << "" << newlyCompleted << " quests completed. Return to quest givers.";
-    PushMessage(messages, os.str());
+    PublishEvent(
+        eventBus,
+        GameEventFactory::Quest(os.str(), std::nullopt, std::nullopt, newlyCompleted)
+    );
 }
 
-void AddQuestProgressLine(std::deque<std::string>& messages, const Quest& quest) {
+void AddQuestProgressLine(EventBus& eventBus, const Quest& quest) {
     std::ostringstream os;
     os << "Quest progress: " << quest.ProgressText();
-    PushMessage(messages, os.str());
+    PublishEvent(
+        eventBus,
+        GameEventFactory::Quest(os.str(), quest.GetId(), quest.GetTitle(), quest.GetCurrentAmount())
+    );
 }
 
 int CountAliveMonsters(const Map& map) {
@@ -956,9 +1182,11 @@ void TrySpawnMonster(
     Map& map,
     std::chrono::steady_clock::time_point& lastSpawnTick,
     int& remainingRespawns,
-    std::deque<std::string>& messages
+    EventBus& eventBus
 ) {
-    constexpr auto kSpawnInterval = std::chrono::seconds(20);
+    const auto kSpawnInterval = std::chrono::seconds(
+        std::max(1, GameConfig::Instance().GetMonsterSpawnIntervalSeconds())
+    );
     constexpr int kSafeDistanceFromPlayer = 8;
     constexpr int kSpawnAttempts = 128;
 
@@ -1011,7 +1239,7 @@ void TrySpawnMonster(
 
         std::ostringstream os;
         os << "A " << spawnedName << " spawned nearby. Respawns left: " << remainingRespawns;
-        PushMessage(messages, os.str());
+        PublishEvent(eventBus, GameEventFactory::Spawn(os.str(), spawnedName, remainingRespawns));
         return;
     }
 }
@@ -1020,14 +1248,26 @@ void TrySpawnMonster(
 
 void Engine::Init() {
     loadedFromSave = false;
+
+    auto& config = GameConfig::Instance();
+    const bool loaded =
+        config.LoadFromFile("data/game_config.txt") ||
+        config.LoadFromFile("../data/game_config.txt");
+
+    if (loaded) {
+        Logger::Instance().Info("Runtime game configuration loaded.");
+    } else {
+        Logger::Instance().Warn("Runtime config not found. Using built-in defaults.");
+    }
 }
 
 void Engine::Run() {
     Listener listener;
     Renderer renderer;
     renderer.Init();
+    ScopedLoggerStdErrMute scopedLoggerMute;
 
-    const bool hasSaveFile = std::filesystem::exists("map_save.txt");
+    const bool hasSaveFile = ResourceManager::Instance().FileExists(GameConfig::Instance().GetSavePath());
     const StartMenuChoice startChoice = PromptStartMenu(renderer, listener, hasSaveFile);
     if (startChoice == StartMenuChoice::QUIT) {
         return;
@@ -1057,21 +1297,41 @@ void Engine::Run() {
     map.MarkVisibleAsExplored(explored);
 
     std::deque<std::string> messages;
-    PushMessage(messages, "WASD move, F attack, E interact, I inventory, K equipment, M action menu, P allocate stats, R restart, F1 help, Q quit.");
+    EventBus eventBus;
+    eventBus.Subscribe([&](const GameEvent& event) {
+        if (!event.message.empty()) {
+            PushMessage(messages, event.message);
+        }
+    });
+    eventBus.Subscribe([](const GameEvent& event) {
+        switch (event.type) {
+        case GameEventType::Error:
+            Logger::Instance().Error(event.message);
+            break;
+        case GameEventType::Warning:
+            Logger::Instance().Warn(event.message);
+            break;
+        default:
+            Logger::Instance().Info(event.message);
+            break;
+        }
+    });
+
+    PublishEvent(eventBus, GameEventType::System, "WASD move, F attack, E interact, I inventory, K equipment, M action menu, P allocate stats, R restart, F1 help, Q quit.");
     if (failedToLoadSave) {
-        PushMessage(messages, "Save load failed. Started a new game.");
+        PublishEvent(eventBus, GameEventType::Warning, "Save load failed. Started a new game.");
     }
     if (loadedFromSave) {
-        PushMessage(messages, "Save loaded.");
+        PublishEvent(eventBus, GameEventType::Save, "Save loaded.");
     } else {
-        PushMessage(messages, "New game started for " + map.GetPlayer().GetName() + ".");
+        PublishEvent(eventBus, GameEventType::System, "New game started for " + map.GetPlayer().GetName() + ".");
     }
 
     const std::vector<QuestTemplate> questTemplates = LoadQuestTemplates();
     if (!questTemplates.empty()) {
         std::ostringstream os;
         os << "Loaded quest templates: " << questTemplates.size();
-        PushMessage(messages, os.str());
+        PublishEvent(eventBus, GameEventType::System, os.str());
     }
 
     {
@@ -1084,7 +1344,7 @@ void Engine::Run() {
         if (activeQuests > 0) {
             std::ostringstream os;
             os << "Loaded active quests: " << activeQuests;
-            PushMessage(messages, os.str());
+            PublishEvent(eventBus, GameEventType::Quest, os.str());
         }
     }
 
@@ -1098,7 +1358,7 @@ void Engine::Run() {
     {
         std::ostringstream os;
         os << "Monster spawning enabled. Respawn pool: " << remainingMonsterRespawns;
-        PushMessage(messages, os.str());
+        PublishEvent(eventBus, GameEventType::Spawn, os.str());
     }
 
     auto finalizeAndAppendStats = [&]() {
@@ -1114,32 +1374,32 @@ void Engine::Run() {
         auto& player = map.GetPlayer();
         player.AddPlayTimeSeconds(static_cast<int>(elapsed));
 
-        PushMessage(messages, "=== Session stats ===");
+        PublishEvent(eventBus, GameEventType::System, "=== Session stats ===");
 
         {
             std::ostringstream os;
             os << "Level: " << player.GetLevel();
-            PushMessage(messages, os.str());
+            PublishEvent(eventBus, GameEventType::System, os.str());
         }
         {
             std::ostringstream os;
             os << "Monsters killed: " << player.GetMonstersKilled();
-            PushMessage(messages, os.str());
+            PublishEvent(eventBus, GameEventType::System, os.str());
         }
         {
             std::ostringstream os;
             os << "Distance travelled: " << player.GetDistanceTravelled();
-            PushMessage(messages, os.str());
+            PublishEvent(eventBus, GameEventType::System, os.str());
         }
         {
             std::ostringstream os;
             os << "Items collected: " << player.GetItemsCollected();
-            PushMessage(messages, os.str());
+            PublishEvent(eventBus, GameEventType::System, os.str());
         }
         {
             std::ostringstream os;
             os << "Play time: " << player.GetPlayTimeSeconds() << " sec";
-            PushMessage(messages, os.str());
+            PublishEvent(eventBus, GameEventType::System, os.str());
         }
     };
 
@@ -1155,11 +1415,11 @@ void Engine::Run() {
         if (int restoredHealth = RegeneratePlayerHealth(map, lastRegenTick); restoredHealth > 0) {
             std::ostringstream os;
             os << "You regenerate " << restoredHealth << " HP over time.";
-            PushMessage(messages, os.str());
+            PublishEvent(eventBus, GameEventType::System, os.str());
         }
 
-        TryAutoSave(map, lastAutoSaveTick, messages);
-        TrySpawnMonster(map, lastSpawnTick, remainingMonsterRespawns, messages);
+        TryAutoSave(map, lastAutoSaveTick, eventBus);
+        TrySpawnMonster(map, lastSpawnTick, remainingMonsterRespawns, eventBus);
 
         bool advanceWorld = false;
         bool shouldExit = false;
@@ -1184,22 +1444,39 @@ void Engine::Run() {
         case Action::ATTACK_MONSTER: {
             auto* target = map.FindAttackTarget(map.GetPlayer().GetPosition());
             if (target == nullptr) {
-                PushMessage(messages, "No monster in range.");
+                PublishEvent(eventBus, GameEventType::Combat, "No monster in range.");
                 advanceWorld = true;
                 break;
             }
 
-            int remainingHealth = map.GetPlayer().Attack(*target);
+            auto& player = map.GetPlayer();
+            const int targetHealthBefore = target->GetHealth();
+            int remainingHealth = player.Attack(*target);
+            const int damageDone = std::max(0, targetHealthBefore - remainingHealth);
             {
                 std::ostringstream os;
                 os << "Attacked " << target->GetName() << ", HP left: " << remainingHealth;
-                PushMessage(messages, os.str());
+                PublishEvent(
+                    eventBus,
+                    GameEventFactory::Combat(
+                        os.str(),
+                        player.GetName(),
+                        target->GetName(),
+                        damageDone
+                    )
+                );
             }
 
             if (!target->IsAlive()) {
-                PushMessage(messages, target->GetName() + " was defeated.");
+                PublishEvent(
+                    eventBus,
+                    GameEventFactory::Combat(
+                        target->GetName() + " was defeated.",
+                        player.GetName(),
+                        target->GetName()
+                    )
+                );
 
-                auto& player = map.GetPlayer();
                 int levelBefore = player.GetLevel();
                 int reward = target->GetExperienceReward();
                 player.GainExperience(reward);
@@ -1208,28 +1485,62 @@ void Engine::Run() {
                     std::ostringstream os;
                     os << "Gained " << reward << " XP. Level: " << player.GetLevel()
                        << " (" << player.GetExperience() << "/" << player.GetExperienceToNextLevel() << ")";
-                    PushMessage(messages, os.str());
+                    PublishEvent(
+                        eventBus,
+                        GameEventFactory::Combat(
+                            os.str(),
+                            player.GetName(),
+                            target->GetName(),
+                            std::nullopt,
+                            reward
+                        )
+                    );
                 }
 
                 if (player.GetLevel() > levelBefore) {
                     std::ostringstream os;
                     os << "Level up! Unspent stat points: " << player.GetUnspentStatPoints();
-                    PushMessage(messages, os.str());
+                    PublishEvent(
+                        eventBus,
+                        GameEventFactory::Progression(
+                            GameEventType::System,
+                            os.str(),
+                            player.GetName(),
+                            player.GetLevel(),
+                            player.GetUnspentStatPoints()
+                        )
+                    );
                 }
 
                 int completedFromKills = player.UpdateQuestProgress(Quest::Type::KILL_MONSTERS, 1);
-                PushQuestCompletionHint(messages, completedFromKills);
+                PushQuestCompletionHint(eventBus, completedFromKills);
 
                 Item loot = target->GetDropItem();
                 if (!(loot == NO_ITEM)) {
                     auto before = player.GetInventorySize();
                     player.PickUpItem(loot);
                     if (player.GetInventorySize() > before) {
-                        PushMessage(messages, "Monster dropped: " + loot.GetName());
+                        PublishEvent(
+                            eventBus,
+                            GameEventFactory::Inventory(
+                                GameEventType::System,
+                                "Monster dropped: " + loot.GetName(),
+                                loot.GetName(),
+                                false
+                            )
+                        );
                         int completedFromItems = player.UpdateQuestProgress(Quest::Type::COLLECT_ITEMS, 1);
-                        PushQuestCompletionHint(messages, completedFromItems);
+                        PushQuestCompletionHint(eventBus, completedFromItems);
                     } else {
-                        PushMessage(messages, "Monster dropped " + loot.GetName() + ", but inventory is full.");
+                        PublishEvent(
+                            eventBus,
+                            GameEventFactory::Inventory(
+                                GameEventType::Warning,
+                                "Monster dropped " + loot.GetName() + ", but inventory is full.",
+                                loot.GetName(),
+                                true
+                            )
+                        );
                     }
                 }
             }
@@ -1239,14 +1550,21 @@ void Engine::Run() {
         case Action::INTERACT: {
             auto* npc = map.FindInteractableNpc(map.GetPlayer().GetPosition());
             if (npc != nullptr) {
-                PushMessage(messages, npc->Talk());
+                PublishEvent(eventBus, GameEventType::System, npc->Talk());
 
                 auto& player = map.GetPlayer();
                 Quest* quest = player.FindQuestByGiver(npc->GetName());
                 if (quest == nullptr) {
                     Quest newQuest = CreateQuestForNpc(map, *npc, questTemplates);
-                    AddQuestProgressLine(messages, newQuest);
-                    PushMessage(messages, "New quest: " + newQuest.GetTitle());
+                    AddQuestProgressLine(eventBus, newQuest);
+                    PublishEvent(
+                        eventBus,
+                        GameEventFactory::Quest(
+                            "New quest: " + newQuest.GetTitle(),
+                            newQuest.GetId(),
+                            newQuest.GetTitle()
+                        )
+                    );
                     player.AddQuest(newQuest);
                 } else if (quest->IsCompleted() && !quest->IsRewarded()) {
                     int rewardXp = quest->GetRewardExperience();
@@ -1255,11 +1573,27 @@ void Engine::Run() {
 
                     std::ostringstream os;
                     os << "Quest complete! Reward: " << rewardXp << " XP.";
-                    PushMessage(messages, os.str());
+                    PublishEvent(
+                        eventBus,
+                        GameEventFactory::Quest(
+                            os.str(),
+                            quest->GetId(),
+                            quest->GetTitle(),
+                            std::nullopt,
+                            rewardXp
+                        )
+                    );
                 } else if (!quest->IsCompleted()) {
-                    AddQuestProgressLine(messages, *quest);
+                    AddQuestProgressLine(eventBus, *quest);
                 } else {
-                    PushMessage(messages, "No new quests right now.");
+                    PublishEvent(
+                        eventBus,
+                        GameEventFactory::Quest(
+                            "No new quests right now.",
+                            quest->GetId(),
+                            quest->GetTitle()
+                        )
+                    );
                 }
 
                 advanceWorld = true;
@@ -1268,61 +1602,86 @@ void Engine::Run() {
 
             auto* chest = map.FindInteractableChest(map.GetPlayer().GetPosition());
             if (chest == nullptr) {
-                PushMessage(messages, "Nothing to interact with nearby.");
+                PublishEvent(eventBus, GameEventType::System, "Nothing to interact with nearby.");
                 advanceWorld = true;
                 break;
             }
 
             Item loot = chest->Open();
             if (loot == NO_ITEM) {
-                PushMessage(messages, "Chest is empty.");
+                PublishEvent(eventBus, GameEventType::System, "Chest is empty.");
                 break;
             }
 
             auto before = map.GetPlayer().GetInventorySize();
             map.GetPlayer().PickUpItem(loot);
             if (map.GetPlayer().GetInventorySize() == before) {
-                PushMessage(messages, "Inventory is full, cannot pick up: " + loot.GetName());
+                PublishEvent(
+                    eventBus,
+                    GameEventFactory::Inventory(
+                        GameEventType::Warning,
+                        "Inventory is full, cannot pick up: " + loot.GetName(),
+                        loot.GetName(),
+                        true
+                    )
+                );
             } else {
-                PushMessage(messages, "Picked up: " + loot.GetName());
+                PublishEvent(
+                    eventBus,
+                    GameEventFactory::Inventory(
+                        GameEventType::System,
+                        "Picked up: " + loot.GetName(),
+                        loot.GetName(),
+                        false
+                    )
+                );
                 int completedFromItems = map.GetPlayer().UpdateQuestProgress(Quest::Type::COLLECT_ITEMS, 1);
-                PushQuestCompletionHint(messages, completedFromItems);
+                PushQuestCompletionHint(eventBus, completedFromItems);
             }
             advanceWorld = true;
             break;
         }
         case Action::PICK_UP_ITEM:
-            if (ShowInventoryScreen(renderer, listener, map.GetPlayer(), messages)) {
+            if (ShowInventoryScreen(renderer, listener, map.GetPlayer(), eventBus)) {
                 advanceWorld = true;
             }
             break;
         case Action::SHOW_EQUIPMENT:
-            if (ShowEquipmentScreen(renderer, listener, map.GetPlayer(), messages)) {
+            if (ShowEquipmentScreen(renderer, listener, map.GetPlayer(), eventBus)) {
                 advanceWorld = true;
             }
             break;
         case Action::ALLOCATE_STATS: {
             auto& player = map.GetPlayer();
             if (player.GetUnspentStatPoints() <= 0) {
-                PushMessage(messages, "No stat points available.");
+                PublishEvent(eventBus, GameEventType::Warning, "No stat points available.");
                 break;
             }
 
-            PushMessage(messages, "Allocate point: 1-Strength, 2-Agility, 3-Vitality");
+            PublishEvent(eventBus, GameEventType::System, "Allocate point: 1-Strength, 2-Agility, 3-Vitality");
             renderer.RenderFrame(map, explored, messages);
             Action allocationChoice = listener.GetAction();
             if (TryAllocateStatFromAction(player, allocationChoice)) {
                 std::ostringstream os;
                 os << "Stat allocated. Remaining points: " << player.GetUnspentStatPoints();
-                PushMessage(messages, os.str());
+                PublishEvent(
+                    eventBus,
+                    GameEventFactory::Progression(
+                        GameEventType::System,
+                        os.str(),
+                        player.GetName(),
+                        player.GetLevel(),
+                        player.GetUnspentStatPoints()
+                    )
+                );
                 advanceWorld = true;
             } else {
-                PushMessage(messages, "Invalid stat allocation choice.");
+                PublishEvent(eventBus, GameEventType::Warning, "Invalid stat allocation choice.");
             }
             break;
         }
         case Action::RESTART_GAME: {
-            PushMessage(messages, "Restart current run? Y/N");
+            PublishEvent(eventBus, GameEventType::System, "Restart current run? Y/N");
             renderer.RenderFrame(map, explored, messages);
 
             int key = listener.GetKey(-1);
@@ -1331,7 +1690,7 @@ void Engine::Run() {
                 : '\0';
 
             if (c != 'Y') {
-                PushMessage(messages, "Restart canceled.");
+                PublishEvent(eventBus, GameEventType::System, "Restart canceled.");
                 break;
             }
 
@@ -1344,8 +1703,8 @@ void Engine::Run() {
             map.MarkVisibleAsExplored(explored);
 
             messages.clear();
-            PushMessage(messages, "WASD move, F attack, E interact, I inventory, K equipment, M action menu, P allocate stats, R restart, F1 help, Q quit.");
-            PushMessage(messages, "New game started for " + map.GetPlayer().GetName() + ".");
+            PublishEvent(eventBus, GameEventType::System, "WASD move, F attack, E interact, I inventory, K equipment, M action menu, P allocate stats, R restart, F1 help, Q quit.");
+            PublishEvent(eventBus, GameEventType::System, "New game started for " + map.GetPlayer().GetName() + ".");
 
             gameStart = std::chrono::steady_clock::now();
             lastRegenTick = gameStart;
@@ -1355,7 +1714,7 @@ void Engine::Run() {
             {
                 std::ostringstream os;
                 os << "Monster spawning enabled. Respawn pool: " << remainingMonsterRespawns;
-                PushMessage(messages, os.str());
+                PublishEvent(eventBus, GameEventType::Spawn, os.str());
             }
             sessionFinalized = false;
             break;
@@ -1363,18 +1722,21 @@ void Engine::Run() {
         case Action::TOGGLE_HELP:
             ShowHelpScreen(renderer, listener);
             break;
+        case Action::DRAW_ASCII:
+            ShowAsciiDrawScreen(renderer, listener, eventBus);
+            break;
         default:
             if (int index = ActionToInventoryIndex(action); index >= 0) {
                 auto& player = map.GetPlayer();
                 if (index >= player.GetInventorySize()) {
-                    PushMessage(messages, "No item in this inventory slot.");
+                    PublishEvent(eventBus, GameEventType::Warning, "No item in this inventory slot.");
                     advanceWorld = true;
                     break;
                 }
 
                 std::string itemName = player.GetInventory()[index].GetName();
                 player.UseItem(index);
-                PushMessage(messages, "Used: " + itemName);
+                PublishEvent(eventBus, GameEventType::System, "Used: " + itemName);
                 advanceWorld = true;
                 break;
             }
@@ -1385,29 +1747,29 @@ void Engine::Run() {
         if (action == Action::QUIT_GAME) {
             finalizeAndAppendStats();
             if (map.Save()) {
-                PushMessage(messages, "Game saved.");
+                PublishEvent(eventBus, GameEventType::Save, "Game saved.");
             } else {
-                PushMessage(messages, "Failed to save game.");
+                PublishEvent(eventBus, GameEventType::Error, "Failed to save game.");
             }
-            PushMessage(messages, "Quitting game.");
+            PublishEvent(eventBus, GameEventType::System, "Quitting game.");
             shouldExit = true;
         }
 
         if (!shouldExit && advanceWorld) {
             int reachedObjectives = map.GetPlayer().UpdateReachQuestProgress(map.GetPlayer().GetPosition());
-            PushQuestCompletionHint(messages, reachedObjectives);
-            map.ProcessMonstersTurn(messages);
+            PushQuestCompletionHint(eventBus, reachedObjectives);
+            map.ProcessMonstersTurn(eventBus);
         }
 
         if (!shouldExit && !map.GetPlayer().IsAlive()) {
-            PushMessage(messages, "Game Over. The hero has fallen.");
+            PublishEvent(eventBus, GameEventType::System, "Game Over. The hero has fallen.");
             finalizeAndAppendStats();
             ShowGameOverScreen(renderer, listener, map.GetPlayer());
             break;
         }
 
         if (!shouldExit && map.AreAllMonstersDefeated() && remainingMonsterRespawns <= 0) {
-            PushMessage(messages, "Victory! All monsters are defeated.");
+            PublishEvent(eventBus, GameEventType::System, "Victory! All monsters are defeated.");
             finalizeAndAppendStats();
             ShowVictoryScreen(renderer, listener, map.GetPlayer());
             break;

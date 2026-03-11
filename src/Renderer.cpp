@@ -84,10 +84,12 @@ bool IsWithinViewRadius(const Point& center, int radius, int x, int y) {
 
 Color ObstacleColor(char symbol) {
     switch (symbol) {
+    case '^':
     case 'R':
         return Color::Brown;
     case 'T':
         return Color::Green;
+    case '~':
     case 'W':
         return Color::Cyan;
     case '#':

@@ -36,6 +36,7 @@ enum class Action: char {
     ALLOCATE_STATS = 'P',
     INTERACT = 'E',
     OPEN_ACTION_MENU = 'M',
+    DRAW_ASCII = 'Z',
     RESTART_GAME = 'R',
     TOGGLE_HELP = 'H',
     QUIT_GAME = 'Q'

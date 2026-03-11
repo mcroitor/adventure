@@ -1,0 +1,8 @@
+# Adventure runtime configuration
+# key=value
+
+message_log_capacity=24
+auto_save_interval_seconds=45
+monster_spawn_interval_seconds=20
+save_path=map_save.txt
+quest_template_paths=data/quests.txt;../data/quests.txt

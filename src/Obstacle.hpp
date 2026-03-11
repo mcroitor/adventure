@@ -16,9 +16,9 @@ public:
      * @brief Types of obstacles
      */
     enum class Type {
-        ROCK = 0,  /**< Rock obstacle (R) */
+        ROCK = 0,  /**< Rock/Mountain obstacle (^) */
         TREE = 1,  /**< Tree obstacle (T) */
-        WATER = 2, /**< Water obstacle (W) */
+        WATER = 2, /**< Water obstacle (~) */
         WALL = 3   /**< Wall obstacle (#) */
     };
 
@@ -46,13 +46,13 @@ public:
 
     /**
      * @brief Get rendering symbol based on obstacle type
-     * @return 'R' for rock, 'T' for tree, 'W' for water, '#' for wall
+     * @return '^' for rock/mountain, 'T' for tree, '~' for water, '#' for wall
      */
     virtual char GetSymbol() const override {
         switch(static_cast<Type>(type)) {
-            case Type::ROCK: return 'R';
+            case Type::ROCK: return '^';
             case Type::TREE: return 'T';
-            case Type::WATER: return 'W';
+            case Type::WATER: return '~';
             case Type::WALL: return '#';
             default: return '?';
         }

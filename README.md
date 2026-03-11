@@ -14,19 +14,19 @@ Example of the map representation in console:
 
 ```text
 #######################################
-#........R..........TTT..NT....R......#  H - Hero
-#........R...........TTT.TT...........#  M - Monster
-#....T...R.....C......................#  C - Closed Chest
-#....T................R...............#  O - Opened Chest
-#....TTTTTT.........WWR...............#  R - Rock (Obstacle)
-#....T...............WWWWWW......O....#  T - Tree (Obstacle)
-#..MCR................WWC.W......W....#  W - Water (Obstacle)
-#..RRR...............WWWWM............#  N - NPC (Non-Player Character)
+#........^..........TTT..NT....^......#  H - Hero
+#........^...........TTT.TT...........#  M - Monster
+#....T...^.....C......................#  C - Closed Chest
+#....T................^...............#  O - Opened Chest
+#....TTTTTT.........~~^...............#  ^ - Rock / Mountain (Obstacle)
+#....T...............~~~~~~......O....#  T - Tree (Obstacle)
+#..MC^................~~C.~......~....#  ~ - Water (Obstacle)
+#..^^^...............~~~~M............#  N - NPC (Non-Player Character)
 #........................T............#
-#................R....................#
-#...........RR.M.RR......T............#
-#............R...RR..........R........#
-#H...............R...........RNC......#
+#................^....................#
+#...........^^.M.^^......T............#
+#............^...^^..........^........#
+#H...............^...........^NC......#
 #######################################
 ```
 
@@ -37,11 +37,24 @@ Example of the map representation in console:
 - `S`: Move Down
 - `D`: Move Right
 - `I`: Open Inventory
+- `K`: Open Equipment
+- `M`: Open Action Menu
+- `Esc`: Open Action Menu
 - `1` .. `9`: Select option / item in inventory
 - `P`: Allocate stat points (then `1`: strength, `2`: agility, `3`: vitality)
 - `E`: Interact with object (chest, NPC, etc.)
 - `F`: Attack (when near a monster)
+- `Z`: Open ASCII draw mode
 - `Q`: Quit Game
+
+ASCII draw mode quick controls:
+
+- Move cursor: arrows or `W/A/S/D`
+- Paint: `Enter` or `X`
+- Erase: `Space`
+- Brush presets: `1:^ 2:~ 3:T 4:# 5:. 6:* 7:" 8:grave 9::`
+- Save canvas: `Shift+S` to `data/ascii_art_canvas.txt`
+- Load canvas: `L` from `data/ascii_art_canvas.txt`
 
 ## Development
 
@@ -113,6 +126,13 @@ Note: the console renderer now uses `ncurses` (`curses.h`), so Curses library mu
 - CI is configured in `.github/workflows/ci.yml`.
 - Formatting rules are configured in `.clang-format`.
 - Linting rules are configured in `.clang-tidy`.
+- Runtime config is managed by `GameConfig` (`src/GameConfig.hpp`) and can be overridden via `data/game_config.txt`.
+- Runtime logging is handled by `Logger` (`src/Logger.hpp`).
+- Runtime game events are routed through `EventBus` (`src/EventBus.hpp`).
+- `GameEvent` payload is split into typed sections (`combat`, `quest`, `spawn`, `inventory`, `progression`) to reduce ad-hoc string-only coupling.
+- Prefer `GameEventFactory::*` helpers (`Basic`, `Combat`, `Quest`, `Spawn`, `Inventory`, `Progression`) when publishing events.
+- `EventBus::Publish` validates event payload/type consistency via `GameEvent::Payload::IsConsistentFor(...)`.
+- File/resource access helpers are centralized in `ResourceManager` (`src/ResourceManager.hpp`).
 
 Useful local commands:
 
@@ -133,6 +153,16 @@ Check formatting locally:
 
 ```bash
 clang-format --dry-run $(git ls-files '*.cpp' '*.hpp' '*.h')
+```
+
+Runtime config file (`data/game_config.txt`) keys:
+
+```text
+message_log_capacity
+auto_save_interval_seconds
+monster_spawn_interval_seconds
+save_path
+quest_template_paths
 ```
 
 ### Versioning

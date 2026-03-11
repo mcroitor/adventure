@@ -8,14 +8,16 @@
  */
 
 #include "Map.hpp"
+#include "EventBus.hpp"
+#include "GameConfig.hpp"
+#include "Logger.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <ctime>
-#include <deque>
 #include <fstream>
 #include <iomanip>
-#include <iostream>
 #include <limits>
 #include <queue>
 #include <sstream>
@@ -23,7 +25,6 @@
 
 namespace {
 
-constexpr const char* kSavePath = "map_save.txt";
 constexpr const char* kSaveMagic = "ADVENTURE_SAVE_V1";
 
 size_t CellIndex(int width, int x, int y) {
@@ -46,14 +47,6 @@ int Sign(int value) {
         return -1;
     }
     return 0;
-}
-
-void PushMessage(std::deque<std::string>& log, const std::string& message) {
-    constexpr size_t kMaxMessages = 24;
-    log.push_back(message);
-    if (log.size() > kMaxMessages) {
-        log.pop_front();
-    }
 }
 
 void WriteItem(std::ostream& os, const Item& item) {
@@ -254,7 +247,7 @@ NPC* Map::FindInteractableNpc(const Point& position) {
     return nullptr;
 }
 
-void Map::ProcessMonstersTurn(std::deque<std::string>& messages) {
+void Map::ProcessMonstersTurn(EventBus& eventBus) {
     auto& currentPlayer = GetPlayer();
     Point playerPos = currentPlayer.GetPosition();
 
@@ -493,10 +486,19 @@ void Map::ProcessMonstersTurn(std::deque<std::string>& messages) {
         monster.SetReturningHome(true);
 
         if (IsAdjacent(monsterPos, playerPos)) {
+            const int playerHealthBefore = currentPlayer.GetHealth();
             int remainingHealth = currentPlayer.Hit(monster.GetAttack());
+            const int damageDone = std::max(0, playerHealthBefore - remainingHealth);
             std::ostringstream os;
             os << monster.GetName() << " attacks you, HP left: " << remainingHealth;
-            PushMessage(messages, os.str());
+            eventBus.Publish(
+                GameEventFactory::Combat(
+                    os.str(),
+                    monster.GetName(),
+                    currentPlayer.GetName(),
+                    damageDone
+                )
+            );
             continue;
         }
 
@@ -858,16 +860,17 @@ MapPart Map::GetMapPart() const {
 }
 
 bool Map::Load() {
-    std::ifstream file(kSavePath);
+    const std::string& savePath = GameConfig::Instance().GetSavePath();
+    std::ifstream file(savePath);
     if (!file.is_open()) {
-        std::cerr << "Error: Could not open save file for reading." << std::endl;
+        Logger::Instance().Error("Could not open save file for reading: " + savePath);
         return false;
     }
 
     std::string magic;
     std::getline(file, magic);
     if (magic != kSaveMagic) {
-        std::cerr << "Error: Invalid save file format." << std::endl;
+        Logger::Instance().Error("Invalid save file format.");
         return false;
     }
 
@@ -876,7 +879,7 @@ bool Map::Load() {
     int loadedHeight = 0;
 
     if (!(file >> tag >> loadedWidth >> loadedHeight) || tag != "MAP") {
-        std::cerr << "Error: MAP section is missing or invalid." << std::endl;
+        Logger::Instance().Error("MAP section is missing or invalid.");
         return false;
     }
 
@@ -902,7 +905,7 @@ bool Map::Load() {
           >> playerLevel >> playerExperience >> playerExperienceToNextLevel >> playerUnspentStatPoints
           >> playerMonstersKilled >> playerDistanceTravelled >> playerItemsCollected >> playerPlayTimeSeconds)
         || tag != "PLAYER") {
-        std::cerr << "Error: PLAYER section is missing or invalid." << std::endl;
+        Logger::Instance().Error("PLAYER section is missing or invalid.");
                 return false;
     }
 
@@ -912,18 +915,18 @@ bool Map::Load() {
     Item boots;
     Item shield;
     if (!(file >> tag) || tag != "PLAYER_EQUIPMENT") {
-        std::cerr << "Error: PLAYER_EQUIPMENT section is missing." << std::endl;
+        Logger::Instance().Error("PLAYER_EQUIPMENT section is missing.");
         return false;
     }
     if (!ReadItem(file, helm) || !ReadItem(file, armor) || !ReadItem(file, weapon)
         || !ReadItem(file, boots) || !ReadItem(file, shield)) {
-        std::cerr << "Error: Failed to load player equipment." << std::endl;
+        Logger::Instance().Error("Failed to load player equipment.");
         return false;
     }
 
     size_t inventoryCount = 0;
     if (!(file >> tag >> inventoryCount) || tag != "PLAYER_INVENTORY") {
-        std::cerr << "Error: PLAYER_INVENTORY section is missing or invalid." << std::endl;
+        Logger::Instance().Error("PLAYER_INVENTORY section is missing or invalid.");
         return false;
     }
     std::vector<Item> loadedInventory;
@@ -931,7 +934,7 @@ bool Map::Load() {
     for (size_t i = 0; i < inventoryCount; ++i) {
         Item item;
         if (!ReadItem(file, item)) {
-            std::cerr << "Error: Failed to load player inventory item." << std::endl;
+            Logger::Instance().Error("Failed to load player inventory item.");
             return false;
         }
         loadedInventory.push_back(item);
@@ -939,14 +942,14 @@ bool Map::Load() {
 
     std::vector<Quest> loadedQuests;
     if (!(file >> tag)) {
-        std::cerr << "Error: Unexpected end of save file." << std::endl;
+        Logger::Instance().Error("Unexpected end of save file.");
         return false;
     }
 
     if (tag == "PLAYER_QUESTS") {
         size_t questCount = 0;
         if (!(file >> questCount)) {
-            std::cerr << "Error: PLAYER_QUESTS section is invalid." << std::endl;
+            Logger::Instance().Error("PLAYER_QUESTS section is invalid.");
             return false;
         }
 
@@ -954,21 +957,21 @@ bool Map::Load() {
         for (size_t i = 0; i < questCount; ++i) {
             Quest quest;
             if (!ReadQuest(file, quest)) {
-                std::cerr << "Error: Failed to load player quest." << std::endl;
+                Logger::Instance().Error("Failed to load player quest.");
                 return false;
             }
             loadedQuests.push_back(quest);
         }
 
         if (!(file >> tag)) {
-            std::cerr << "Error: MONSTERS section is missing or invalid." << std::endl;
+            Logger::Instance().Error("MONSTERS section is missing or invalid.");
             return false;
         }
     }
 
     size_t monsterCount = 0;
     if (tag != "MONSTERS" || !(file >> monsterCount)) {
-        std::cerr << "Error: MONSTERS section is missing or invalid." << std::endl;
+        Logger::Instance().Error("MONSTERS section is missing or invalid.");
         return false;
     }
     std::vector<Monster> loadedMonsters;
@@ -988,13 +991,13 @@ bool Map::Load() {
               >> monsterHealth >> monsterMaxHealth >> monsterAgility
               >> monsterStrength >> monsterViewRadius >> monsterExperienceReward)
             || tag != "MONSTER") {
-            std::cerr << "Error: MONSTER entry is invalid." << std::endl;
+            Logger::Instance().Error("MONSTER entry is invalid.");
                         return false;
         }
 
         Item dropItem;
         if (!ReadItem(file, dropItem)) {
-            std::cerr << "Error: Failed to load monster drop item." << std::endl;
+            Logger::Instance().Error("Failed to load monster drop item.");
             return false;
         }
 
@@ -1022,7 +1025,7 @@ bool Map::Load() {
 
     size_t chestCount = 0;
     if (!(file >> tag >> chestCount) || tag != "CHESTS") {
-        std::cerr << "Error: CHESTS section is missing or invalid." << std::endl;
+        Logger::Instance().Error("CHESTS section is missing or invalid.");
         return false;
     }
     std::vector<Chest> loadedChests;
@@ -1032,13 +1035,13 @@ bool Map::Load() {
         int cy = 0;
         int openFlag = 0;
         if (!(file >> tag >> cx >> cy >> openFlag) || tag != "CHEST") {
-            std::cerr << "Error: CHEST entry is invalid." << std::endl;
+            Logger::Instance().Error("CHEST entry is invalid.");
             return false;
         }
 
         Item chestItem;
         if (!ReadItem(file, chestItem)) {
-            std::cerr << "Error: Failed to load chest item." << std::endl;
+            Logger::Instance().Error("Failed to load chest item.");
             return false;
         }
 
@@ -1051,7 +1054,7 @@ bool Map::Load() {
 
     size_t obstacleCount = 0;
     if (!(file >> tag >> obstacleCount) || tag != "OBSTACLES") {
-        std::cerr << "Error: OBSTACLES section is missing or invalid." << std::endl;
+        Logger::Instance().Error("OBSTACLES section is missing or invalid.");
         return false;
     }
     std::vector<Obstacle> loadedObstacles;
@@ -1061,7 +1064,7 @@ bool Map::Load() {
         int oy = 0;
         int obstacleType = 0;
         if (!(file >> tag >> ox >> oy >> obstacleType) || tag != "OBSTACLE") {
-            std::cerr << "Error: OBSTACLE entry is invalid." << std::endl;
+            Logger::Instance().Error("OBSTACLE entry is invalid.");
             return false;
         }
         loadedObstacles.emplace_back(obstacleType, Point{ox, oy});
@@ -1070,14 +1073,14 @@ bool Map::Load() {
     std::vector<NPC> loadedNpcs;
 
     if (!(file >> tag)) {
-        std::cerr << "Error: Unexpected end of save file." << std::endl;
+        Logger::Instance().Error("Unexpected end of save file.");
         return false;
     }
 
     if (tag == "NPCS") {
         size_t npcCount = 0;
         if (!(file >> npcCount)) {
-            std::cerr << "Error: NPCS section is missing or invalid." << std::endl;
+            Logger::Instance().Error("NPCS section is missing or invalid.");
             return false;
         }
 
@@ -1091,7 +1094,7 @@ bool Map::Load() {
 
             if (!(file >> tag >> nx >> ny >> std::quoted(npcName) >> dialogueCursor >> dialogueCount)
                 || tag != "NPC") {
-                std::cerr << "Error: NPC entry is invalid." << std::endl;
+                Logger::Instance().Error("NPC entry is invalid.");
                 return false;
             }
 
@@ -1100,7 +1103,7 @@ bool Map::Load() {
             for (size_t j = 0; j < dialogueCount; ++j) {
                 std::string line;
                 if (!(file >> std::quoted(line))) {
-                    std::cerr << "Error: Failed to load NPC dialogue line." << std::endl;
+                    Logger::Instance().Error("Failed to load NPC dialogue line.");
                     return false;
                 }
                 npcDialogues.push_back(line);
@@ -1112,13 +1115,13 @@ bool Map::Load() {
         }
 
         if (!(file >> tag)) {
-            std::cerr << "Error: END marker is missing." << std::endl;
+            Logger::Instance().Error("END marker is missing.");
             return false;
         }
     }
 
     if (tag != "END") {
-        std::cerr << "Error: END marker is missing." << std::endl;
+        Logger::Instance().Error("END marker is missing.");
         return false;
     }
 
@@ -1164,10 +1167,11 @@ bool Map::Load() {
 }
 
 bool Map::Save() const {
-    std::ofstream file(kSavePath);
+    const std::string& savePath = GameConfig::Instance().GetSavePath();
+    std::ofstream file(savePath);
 
     if (!file.is_open()) {
-        std::cerr << "Error: Could not open file for writing." << std::endl;
+        Logger::Instance().Error("Could not open file for writing: " + savePath);
         return false;
     }
 
