@@ -36,7 +36,7 @@ public:
     Type GetType() const;
 };
 
-const Item NO_ITEM {"no item", 0, 0, Item::Type::NONE};
+inline const Item NO_ITEM {"no item", 0, 0, Item::Type::NONE};
 
 std::ostream& operator<<(std::ostream& os, const Item& item);
 std::istream& operator>>(std::istream& is, Item& item);
