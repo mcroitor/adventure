@@ -12,7 +12,7 @@ size_t MapPart::GetRadius() const {
     return radius;
 }
 
-const std::vector<Monster>& MapPart::GetMonsters() {
+const std::vector<Monster>& MapPart::GetMonsters() const {
     return monsters;
 }
 
