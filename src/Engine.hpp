@@ -4,6 +4,7 @@
 
 class Engine {
     Map map;
+    bool loadedFromSave = false;
 
 public:
     void Init();

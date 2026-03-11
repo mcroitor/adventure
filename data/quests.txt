@@ -1,0 +1,4 @@
+# giver|title|description|type|baseTarget|targetLevelDivisor|baseRewardXp|rewardXpPerLevel|useReachPoint
+Hermit|Clear Nearby Threats|Defeat monsters around this area.|KILL_MONSTERS|2|2|45|6|0
+Trader|Supply Run|Collect useful items for your journey.|COLLECT_ITEMS|2|3|40|5|0
+Scout|Scout Route|Reach landmark at ({x}, {y}).|REACH_POSITION|1|0|55|6|1

@@ -1,6 +1,10 @@
 #pragma once
 
+#include <deque>
 #include <string>
+#include <vector>
+
+class Map;
 
 enum class Color {
     // ASCII colors
@@ -23,19 +27,27 @@ enum class Color {
 };
 
 class Renderer {
-    std::string buffer;
+    bool initialized = false;
     Color backgroundColor = Color::Black;
     Color foregroundColor = Color::White;
 
-    std::string ToASCIIBackgroundColor(Color color);
-    std::string ToASCIIForegroundColor(Color color);
-    std::string ToCursorPosition(int x, int y);
+    void ApplyColors();
+    void SafePutText(int x, int y, const std::string& text);
+    void PrepareScreen(const Map& map, const std::vector<bool>& explored);
 public:
+    ~Renderer();
+
     void Init();
     void SetBackgroundColor(Color color);
     void SetForegroundColor(Color color);
     void ClearScreen();
-    void PutText(int x, int y, const char* text);
+    void PutText(int x, int y, const std::string& text);
     void PutBox(int x, int y, int width, int height);
+    void PutChar(int x, int y, char c);
+    void DrawHud(const Map& map, const std::deque<std::string>& log);
+    void RenderFrame(const Map& map, const std::vector<bool>& explored, const std::deque<std::string>& messages);
     void Draw();
+
+    int GetScreenWidth() const;
+    int GetScreenHeight() const;
 };

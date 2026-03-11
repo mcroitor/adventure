@@ -1,23 +1,10 @@
 #include "Chest.hpp"
 
-Chest::Chest(const Point& pos, const Item& it): position(pos), isOpen(false), item(it) {}
-
 bool Chest::operator==(const Chest& other) const{
-    return this->position == other.position 
+    return this->position.x == other.position.x 
+        && this->position.y == other.position.y
         && this->isOpen == other.isOpen 
         && this->item == other.item;
-}
-
-Point Chest::GetPosition() const{
-    return position;
-}
-
-bool Chest::IsOpen() const{
-    return this->isOpen;
-}
-
-Item Chest::GetItem() const{
-    return this->item;
 }
 
 Item Chest::Open(){
