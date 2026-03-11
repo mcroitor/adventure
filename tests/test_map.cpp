@@ -7,10 +7,19 @@
 
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
+#include "EventBus.hpp"
 #include "Map.hpp"
 #include "Direction.hpp"
 #include "Item.hpp"
+
+TEST_CASE("Obstacle symbols use terrain glyphs", "[Map][Obstacle]") {
+    REQUIRE(Obstacle(static_cast<int>(Obstacle::Type::ROCK), {1, 1}).GetSymbol() == '^');
+    REQUIRE(Obstacle(static_cast<int>(Obstacle::Type::TREE), {1, 1}).GetSymbol() == 'T');
+    REQUIRE(Obstacle(static_cast<int>(Obstacle::Type::WATER), {1, 1}).GetSymbol() == '~');
+    REQUIRE(Obstacle(static_cast<int>(Obstacle::Type::WALL), {1, 1}).GetSymbol() == '#');
+}
 
 TEST_CASE("Map::IsPassable validates bounds and blocking objects", "[Map]") {
     Map map(20, 20);
@@ -132,15 +141,15 @@ TEST_CASE("Monsters return to home after losing player", "[Map]") {
     map.GetPlayer().SetPosition({8, 5});
     map.GetMonsters().push_back(Monster({5, 5}, "Goblin", 50, 8, 12, 6));
 
-    std::deque<std::string> messages;
-    map.ProcessMonstersTurn(messages);
+    EventBus eventBus;
+    map.ProcessMonstersTurn(eventBus);
 
     REQUIRE(map.GetMonsters()[0].IsReturningHome());
 
     map.GetPlayer().SetPosition({35, 35});
     bool reachedHome = false;
     for (int i = 0; i < 20; ++i) {
-        map.ProcessMonstersTurn(messages);
+        map.ProcessMonstersTurn(eventBus);
         if (map.GetMonsters()[0].GetPosition() == Point{5, 5}) {
             reachedHome = true;
             break;
@@ -169,10 +178,10 @@ TEST_CASE("Monsters can return home around obstacles", "[Map]") {
     monster.SetReturningHome(true);
     map.GetMonsters().push_back(monster);
 
-    std::deque<std::string> messages;
+    EventBus eventBus;
     bool reachedHome = false;
     for (int i = 0; i < 40; ++i) {
-        map.ProcessMonstersTurn(messages);
+        map.ProcessMonstersTurn(eventBus);
         if (map.GetMonsters()[0].GetPosition() == Point{5, 5}) {
             reachedHome = true;
             break;
@@ -198,10 +207,10 @@ TEST_CASE("Monsters can chase player around obstacles", "[Map]") {
 
     map.GetMonsters().push_back(Monster({12, 5}, "Goblin", 50, 8, 12, 20));
 
-    std::deque<std::string> messages;
+    EventBus eventBus;
     bool reachedAttackRange = false;
     for (int i = 0; i < 40; ++i) {
-        map.ProcessMonstersTurn(messages);
+        map.ProcessMonstersTurn(eventBus);
         Point pos = map.GetMonsters()[0].GetPosition();
         if (std::abs(pos.x - map.GetPlayer().GetPosition().x) <= 1 &&
             std::abs(pos.y - map.GetPlayer().GetPosition().y) <= 1) {
@@ -211,6 +220,37 @@ TEST_CASE("Monsters can chase player around obstacles", "[Map]") {
     }
 
     REQUIRE(reachedAttackRange);
+}
+
+TEST_CASE("Monster attack publishes combat event payload", "[Map][EventBus]") {
+    Map map(20, 20);
+    map.GetMonsters().clear();
+    map.GetChests().clear();
+    map.GetNpcs().clear();
+    map.GetObstacles().clear();
+
+    map.GetPlayer().SetPosition({5, 5});
+    map.GetMonsters().push_back(Monster({6, 5}, "Goblin", 50, 8, 12, 20));
+
+    EventBus eventBus;
+    std::vector<GameEvent> events;
+    eventBus.Subscribe([&](const GameEvent& event) {
+        events.push_back(event);
+    });
+
+    const int hpBefore = map.GetPlayer().GetHealth();
+    map.ProcessMonstersTurn(eventBus);
+    const int hpAfter = map.GetPlayer().GetHealth();
+
+    REQUIRE(events.size() == 1);
+    REQUIRE(events[0].type == GameEventType::Combat);
+    REQUIRE(events[0].payload.IsConsistentFor(events[0].type));
+    REQUIRE(events[0].payload.combat.attackerName.has_value());
+    REQUIRE(events[0].payload.combat.attackerName.value() == "Goblin");
+    REQUIRE(events[0].payload.combat.targetName.has_value());
+    REQUIRE(events[0].payload.combat.targetName.value() == map.GetPlayer().GetName());
+    REQUIRE(events[0].payload.combat.damage.has_value());
+    REQUIRE(events[0].payload.combat.damage.value() == hpBefore - hpAfter);
 }
 
 TEST_CASE("Map::Save and Map::Load preserve world state", "[Map]") {

@@ -7,9 +7,10 @@
 #include "Obstacle.hpp"
 #include "MapPart.hpp"
 
-#include <deque>
 #include <string>
 #include <vector>
+
+class EventBus;
 
 /**
  * @brief Game world map containing all entities
@@ -154,10 +155,10 @@ public:
     NPC* FindInteractableNpc(const Point& position);
 
     /**
-     * @brief Process one monsters turn and append combat log messages
-     * @param messages Message log buffer
+     * @brief Process one monsters turn and publish combat messages to event bus
+     * @param eventBus Event dispatcher for combat/system messages
      */
-    void ProcessMonstersTurn(std::deque<std::string>& messages);
+    void ProcessMonstersTurn(EventBus& eventBus);
     
     /**
      * @brief Get reference to chests vector

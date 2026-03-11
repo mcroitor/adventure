@@ -29,6 +29,7 @@ Action CharToAction(char c) {
     case 'P': return Action::ALLOCATE_STATS;
     case 'E': return Action::INTERACT;
     case 'M': return Action::OPEN_ACTION_MENU;
+    case 'Z': return Action::DRAW_ASCII;
     case 'R': return Action::RESTART_GAME;
     case 'H': return Action::TOGGLE_HELP;
     case 'Q': return Action::QUIT_GAME;

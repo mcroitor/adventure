@@ -22,6 +22,7 @@ TEST_CASE("Action enum values are correctly defined", "[Action]") {
         REQUIRE(static_cast<char>(Action::ALLOCATE_STATS) == 'P');
         REQUIRE(static_cast<char>(Action::INTERACT) == 'E');
         REQUIRE(static_cast<char>(Action::OPEN_ACTION_MENU) == 'M');
+        REQUIRE(static_cast<char>(Action::DRAW_ASCII) == 'Z');
         REQUIRE(static_cast<char>(Action::RESTART_GAME) == 'R');
         REQUIRE(static_cast<char>(Action::TOGGLE_HELP) == 'H');
         REQUIRE(static_cast<char>(Action::QUIT_GAME) == 'Q');
@@ -55,6 +56,7 @@ TEST_CASE("ActionToChar converts Action to character", "[Action]") {
         REQUIRE(ActionToChar(Action::ALLOCATE_STATS) == 'P');
         REQUIRE(ActionToChar(Action::INTERACT) == 'E');
         REQUIRE(ActionToChar(Action::OPEN_ACTION_MENU) == 'M');
+        REQUIRE(ActionToChar(Action::DRAW_ASCII) == 'Z');
         REQUIRE(ActionToChar(Action::RESTART_GAME) == 'R');
         REQUIRE(ActionToChar(Action::TOGGLE_HELP) == 'H');
         REQUIRE(ActionToChar(Action::QUIT_GAME) == 'Q');
@@ -95,6 +97,8 @@ TEST_CASE("CharToAction converts character to Action", "[Action]") {
         REQUIRE(CharToAction('e') == Action::INTERACT);
         REQUIRE(CharToAction('M') == Action::OPEN_ACTION_MENU);
         REQUIRE(CharToAction('m') == Action::OPEN_ACTION_MENU);
+        REQUIRE(CharToAction('Z') == Action::DRAW_ASCII);
+        REQUIRE(CharToAction('z') == Action::DRAW_ASCII);
         REQUIRE(CharToAction('R') == Action::RESTART_GAME);
         REQUIRE(CharToAction('r') == Action::RESTART_GAME);
         REQUIRE(CharToAction('H') == Action::TOGGLE_HELP);
@@ -134,6 +138,7 @@ TEST_CASE("Action round-trip conversion", "[Action]") {
         testRoundTrip(Action::ALLOCATE_STATS);
         testRoundTrip(Action::INTERACT);
         testRoundTrip(Action::OPEN_ACTION_MENU);
+        testRoundTrip(Action::DRAW_ASCII);
         testRoundTrip(Action::RESTART_GAME);
         testRoundTrip(Action::TOGGLE_HELP);
         testRoundTrip(Action::QUIT_GAME);
@@ -178,6 +183,7 @@ TEST_CASE("Case insensitivity for CharToAction", "[Action]") {
         REQUIRE(CharToAction('P') == CharToAction('p'));
         REQUIRE(CharToAction('E') == CharToAction('e'));
         REQUIRE(CharToAction('M') == CharToAction('m'));
+        REQUIRE(CharToAction('Z') == CharToAction('z'));
         REQUIRE(CharToAction('R') == CharToAction('r'));
         REQUIRE(CharToAction('H') == CharToAction('h'));
         REQUIRE(CharToAction('Q') == CharToAction('q'));

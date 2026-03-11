@@ -13,6 +13,11 @@ Action Listener::GetAction(int timeoutMs) {
         return Action::NONE;
     }
 
+    if (ch == 27) {
+        inputBuffer.push_back(Action::OPEN_ACTION_MENU);
+        return Action::OPEN_ACTION_MENU;
+    }
+
     if (IsToggleHelpInput(ch)) {
         inputBuffer.push_back(Action::TOGGLE_HELP);
         return Action::TOGGLE_HELP;
