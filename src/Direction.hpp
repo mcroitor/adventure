@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "Point.hpp"
+
 enum class Direction {
     NORTH,
     SOUTH,
@@ -14,3 +16,5 @@ enum class Direction {
 };
 
 std::string to_string(Direction direction);
+
+Point DirectionToDelta(Direction direction);
