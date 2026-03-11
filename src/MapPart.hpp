@@ -37,7 +37,7 @@ public:
     size_t GetRadius() const;
 
     /** @brief Get monsters in the map part */
-    const std::vector<Monster>& GetMonsters();
+    const std::vector<Monster>& GetMonsters() const;
 
     /** @brief Get chests in the map part */
     const std::vector<Chest>& GetChests() const;
